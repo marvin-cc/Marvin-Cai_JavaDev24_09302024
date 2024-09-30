@@ -1,0 +1,46 @@
+To run the app simply run the main method of com/crypto/App.java from position-calculator module
+Basically we have below main components
+
+
+                                                                                                       +---------------------+
+                                                                                                       | MarketDataProvider  |
++-------------------------+                          +-----------------+                     +-------->|                     |
+|                         |   DBInitialized Event    |                 |  PositionLoaded Event         +---------------------+
+|    DataInitialization   -------------------------->|  PositionLoader |---------------------^                     |
+|                         |                          |                 |                     |                     |    Publish price update via PriceUpdate topic
++-------------------------+                          +-----------------+                     |                     ↓
+                                                                                             |               Message Queue
+                                                                                             |                     ↑
+                                                                                             |                     |
+                                                                                             |                     |    Subscribe to PriceUpdate topic and calculate price for each ticker and NAV
+                                                                                             |                     |
+                                                                                             |          +---------------------+
+                                                                                             +--------->| PositionCalculator  |
+                                                                                             |          |                     |
+                                                                                             |          +---------------------+
+                                                                                             |                     |
+                                                                                             |                     |    Publish portfolio change via PortfolioChange topic
+                                                                                             |                     ↓
+                                                                                             |                Message Queue
+                                                                                             |                     ↑
+                                                                                             |                     |    Subscribe to PortfolioChange topic and print received portfolio change
+                                                                                             |                     |
+                                                                                             |          +---------------------+
+                                                                                             +--------->| PositionCalculator  |
+                                                                                                        |                     |
+                                                                                                        +---------------------+
+
+
+DataInitialization is to do data initialization by inserting security definition into DB, only stock/options for 4 symbols are pre-defined TSLA, AAPL, AMZN and MSFT
+Then it notify PositionLoader with event to load initial position from a CSV file and calculate price with pre-generated initial price, sigma value
+After position loaded MarketDataProvider will be notified to publish price change using discrete time geometric Brownian motion to a mock message queue via TickMessage to PriceUpdate topic
+The PositionCalculator will subscribe to PriceUpdate topic and calculate ticker value upon receive of price update, then again publish the portfolio change via PortfolioMessage to PortfolioChange topic.
+Finally PositionCalculator subscribe to PortfolioChange topic and print actual portfolio info and NAV upon receives update.
+Option price calculation logic is within OptionPriceCalculator class, it use approximate CDF for calculating normal distribution.
+
+Future Improvements:
+1. Actually want to separate the portfolio display part to another module portfolio-view, but didn't find convenient way to implement SSE or Websocket subscribe in core java, was trying to simulate some sort of client/server communication.
+2. Each box we have above could potentially be separate into a separate service, as they already using async communication channel like event or MQ, then they can be maintain and scale independently, especially PositionCalculator which involve a lot of compute work.
+3. Currently when receiving a single symbol price update we will loop through all orders to calculate update, which is O(N) complexity, it's definitely not the most efficient way to do it.
+   Probably we can reduce compute time by only trigger calculation for related symbol with map, or even move the calculation part to client side.
+4. For the time being, it lacks unit tests and logging/monitoring and better corner case handling which are essential for production service.
